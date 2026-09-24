@@ -10,7 +10,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-  return "Bot Discord z komendą /wyslij działa poprawnie na Renderze!", 200
+  return "Bot Discord z komendą /changelog działa poprawnie na Renderze!", 200
 
 
 def run_flask():
@@ -57,7 +57,7 @@ async def ping_command(interaction: discord.Interaction):
   await interaction.response.send_message(f"Pong! 🏓 Opóźnienie: {latency}ms")
 
 
-# Nowa komenda /wyslij
+# Komenda /wyslij
 @bot.tree.command(
     name="wyslij", description="Wysyła określoną wiadomość przez bota"
 )
@@ -66,15 +66,50 @@ async def wyslij_command(
     tekst: str,
     kanal: discord.TextChannel = None,
 ):
-  # Jeśli nie podano kanału, wyślij na obecnym kanale
   docelowy_kanal = kanal or interaction.channel
-
-  # Wysłanie wiadomości przez bota na wskazany kanał
   await docelowy_kanal.send(tekst)
-
-  # Prywatne potwierdzenie dla Ciebie, że wiadomość została wysłana
   await interaction.response.send_message(
       f"✅ Pomyślnie wysłano wiadomość na kanale {docelowy_kanal.mention}!",
+      ephemeral=True,
+  )
+
+
+# Komenda /changelog z nagłówkiem BLOWHC.PL
+@bot.tree.command(
+    name="changelog", description="Tworzy profesjonalny changelog serwera"
+)
+async def changelog_command(
+    interaction: discord.Interaction,
+    tryb: str,
+    zmiany: str,
+    wiadomosc_wstepna: str = "Wprowadziliśmy zmiany na serwerze!",
+    kanal: discord.TextChannel = None,
+):
+  docelowy_kanal = kanal or interaction.channel
+
+  # Tworzenie Embeda w stylu BLOWHC.PL
+  embed = discord.Embed(
+      title=f"🛠️ AKTUALIZACJA ({tryb.upper()})",
+      description=f"{wiadomosc_wstepna}\n\n> {zmiany}",
+      color=discord.Color.gold(),  # Żółty pasek po lewej stronie
+  )
+
+  # Nagłówek zmieniony na BLOWHC.PL • CHANGELOG
+  embed.set_author(name="BLOWHC.PL • CHANGELOG")
+
+  # Stopka z informacją, kto dodał changelog
+  embed.set_footer(
+      text=f"Wprowadzone przez: {interaction.user.name}",
+      icon_url=interaction.user.display_avatar.url,
+  )
+
+  # Wysłanie embeda na kanał
+  await docelowy_kanal.send(embed=embed)
+
+  # Potwierdzenie dla administratora
+  await interaction.response.send_message(
+      f"✅ Pomyślnie opublikowano changelog na kanale"
+      f" {docelowy_kanal.mention}!",
       ephemeral=True,
   )
 
