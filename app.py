@@ -4,13 +4,13 @@ import discord
 from discord.ext import commands
 from flask import Flask
 
-# Inicjalizacja aplikacji Flask (wymagane przez Render)
+# Inicjalizacja aplikacji Flask (wymagane przez Render do utrzymania usługi)
 app = Flask(__name__)
 
 
 @app.route("/")
 def home():
-  return "Bot Discord z komendami / działa poprawnie na Renderze!", 200
+  return "Bot Discord z natychmiastowymi komendami / działa na Renderze!", 200
 
 
 def run_flask():
@@ -18,20 +18,30 @@ def run_flask():
   app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
 
-# Konfiguracja bota Discord z użyciem commands.Bot
+# Konfiguracja bota Discord
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+# WAŻNE: Wpisz tutaj ID swojego serwera Discord, aby komendy pojawiły się natychmiast!
+# (Kliknij prawym przyciskiem myszy na nazwę swojego serwera na Discordzie -> Kopiuj ID)
+MY_GUILD = discord.Object(
+    id=1462137124043227228
+)  # <--- ZAMIEŃ TE CYFRY NA SWOJE ID SERWERA
 
 
 @bot.event
 async def on_ready():
   print(f"Zalogowano pomyślnie jako: {bot.user.name}")
   try:
-    # Synchronizacja komend ukośnika (/) z Discordem
-    synced = await bot.tree.sync()
-    print(f"Zsynchronizowano pomyślnie {len(synced)} komend(y) ukośnika.")
+    # Kopiuje i natychmiast synchronizuje komendy dla Twojego serwera (brak opóźnienia)
+    bot.tree.copy_global_to(guild=MY_GUILD)
+    synced = await bot.tree.sync(guild=MY_GUILD)
+    print(
+        f"Zsynchronizowano natychmiast {len(synced)} komend(y) dla Twojego"
+        " serwera!"
+    )
   except Exception as e:
-    print(f"Błąd podczas synchronizacji komend: {e}")
+    print(f"Błąd podczas natychmiastowej synchronizacji komend: {e}")
 
 
 # Definicja komendy /start
@@ -40,8 +50,8 @@ async def on_ready():
 )
 async def start_command(interaction: discord.Interaction):
   await interaction.response.send_message(
-      "Cześć! Jestem Twoim botem Discord z komendami ukośnika (/)"
-      " uruchomionym na Renderze."
+      "Cześć! Jestem Twoim botem Discord z natychmiastowymi komendami ukośnika"
+      " (/) uruchomionym na Renderze."
   )
 
 
@@ -59,10 +69,10 @@ if __name__ == "__main__":
     print("BŁĄD: Brak zmiennej środowiskowej DISCORD_BOT_TOKEN!")
     exit(1)
 
-  # Uruchomienie serwera Flask w tle dla Rendera
+  # Uruchomienie serwera Flask w osobnym wątku (dla Render Web Service)
   flask_thread = threading.Thread(target=run_flask)
   flask_thread.daemon = True
   flask_thread.start()
 
-  # Uruchomienie bota Discord
+  # Uruchomienie bota Discord w głównym wątku
   bot.run(TOKEN)
