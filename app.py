@@ -11,7 +11,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-  return "Bot Discord z zaawansowanym systemem ticketów działa na Renderze!", 200
+  return "Bot Discord z systemem ticketów i logów działa na Renderze!", 200
 
 
 def run_flask():
@@ -30,6 +30,13 @@ MY_GUILD = discord.Object(id=1462137124043227228)
 
 # Modal do podania powodu zamknięcia ticketa przez administratora
 class CloseTicketModal(discord.ui.Modal, title="Powód zamknięcia ticketa"):
+
+  def __init__(self, ticket_type, creator, claimed_by):
+    super().__init__()
+    self.ticket_type = ticket_type
+    self.creator = creator
+    self.claimed_by = claimed_by
+
   powod = discord.ui.TextInput(
       label="Powód zamknięcia",
       placeholder="Wpisz powód zamknięcia ticketa...",
@@ -40,6 +47,48 @@ class CloseTicketModal(discord.ui.Modal, title="Powód zamknięcia ticketa"):
   async def on_submit(self, interaction: discord.Interaction):
     powod_tekst = self.powod.value
     admin = interaction.user
+    guild = interaction.guild
+    channel = interaction.channel
+
+    # Wyszukanie lub utworzenie kanału na historię/logi ticketów
+    log_channel = discord.utils.get(guild.text_channels, name="ticket-logs")
+    if not log_channel:
+      category = discord.utils.get(guild.categories, name="TICKETS")
+      log_channel = await guild.create_text_channel(
+          "ticket-logs", category=category
+      )
+
+    # Tworzenie embeda z historią ticketa do wysłania na kanał logów
+    log_embed = discord.Embed(
+        title="📁 ARCHIWUM / HISTORIA TICKETA", color=discord.Color.dark_red()
+    )
+    log_embed.add_field(
+        name="Typ ticketa", value=self.ticket_type.capitalize(), inline=True
+    )
+    log_embed.add_field(
+        name="Autor zgłoszenia",
+        value=self.creator.mention if self.creator else "Nieznany",
+        inline=True,
+    )
+    log_embed.add_field(
+        name="Przyjęty przez",
+        value=(
+            self.claimed_by.mention
+            if self.claimed_by != "Nikt"
+            else "Nikt nie przyjął"
+        ),
+        inline=True,
+    )
+    log_embed.add_field(
+        name="Zamknięty przez", value=admin.mention, inline=True
+    )
+    log_embed.add_field(
+        name="Powód zamknięcia", value=powod_tekst, inline=False
+    )
+    log_embed.set_footer(text=f"Zamknięty kanał: {channel.name}")
+
+    if log_channel:
+      await log_channel.send(embed=log_embed)
 
     await interaction.response.send_message(
         f"🔒 **Ticket zamknięty przez:** {admin.mention}\n**Powód:**"
@@ -47,7 +96,7 @@ class CloseTicketModal(discord.ui.Modal, title="Powód zamknięcia ticketa"):
     )
     await asyncio.sleep(3)
     try:
-      await interaction.channel.delete()
+      await channel.delete()
     except Exception:
       pass
 
@@ -55,9 +104,13 @@ class CloseTicketModal(discord.ui.Modal, title="Powód zamknięcia ticketa"):
 # Panel zarządzania wewnątrz ticketa (Przyjmij / Zamknij)
 class TicketManageView(discord.ui.View):
 
-  def __init__(self):
-    super().__init__(timeout=None)
-    self.claimed_by = None
+  def __init__(self, ticket_type, creator):
+    super().__init__(
+        timeout=86400
+    )  # Timeout ustawiony na 24h dla bezpieczeństwa przycisków
+    self.ticket_type = ticket_type
+    self.creator = creator
+    self.claimed_by = "Nikt"
 
   @discord.ui.button(
       label="Przyjmij ticket",
@@ -70,15 +123,21 @@ class TicketManageView(discord.ui.View):
   ):
     self.claimed_by = interaction.user
     button.disabled = True
-    button.label = f"Przyjęte przez: {interaction.user.name}"
+    button.label = f"Przyjęte: {interaction.user.name}"
     button.style = discord.ButtonStyle.green
 
     embed = interaction.message.embeds[0]
-    embed.add_field(
-        name="📌 Status",
-        value=f"Ticket przyjęty przez: {interaction.user.mention}",
-        inline=False,
-    )
+    found = False
+    for field in embed.fields:
+      if field.name == "📌 Status":
+        found = True
+        break
+    if not found:
+      embed.add_field(
+          name="📌 Status",
+          value=f"Ticket przyjęty przez: {interaction.user.mention}",
+          inline=False,
+      )
 
     await interaction.message.edit(embed=embed, view=self)
     await interaction.response.send_message(
@@ -95,11 +154,12 @@ class TicketManageView(discord.ui.View):
   async def close_ticket(
       self, interaction: discord.Interaction, button: discord.ui.Button
   ):
-    # Otwiera okienko wymuszające podanie powodu zamknięcia przez administratora
-    await interaction.response.send_modal(CloseTicketModal())
+    await interaction.response.send_modal(
+        CloseTicketModal(self.ticket_type, self.creator, self.claimed_by)
+    )
 
 
-# Rozwijane menu (Select Menu) z wyborami typów ticketów
+# Rozwijane menu z opcjami ticketów
 class TicketSelect(discord.ui.Select):
 
   def __init__(self):
@@ -196,7 +256,9 @@ class TicketSelect(discord.ui.Select):
         color=discord.Color.green(),
     )
 
-    await ticket_channel.send(embed=ticket_embed, view=TicketManageView())
+    await ticket_channel.send(
+        embed=ticket_embed, view=TicketManageView(ticket_type, user)
+    )
     await interaction.response.send_message(
         f"✅ Utworzono Twój ticket: {ticket_channel.mention}!", ephemeral=True
     )
@@ -213,9 +275,8 @@ class TicketSelectView(discord.ui.View):
 async def on_ready():
   print(f"Zalogowano pomyślnie jako: {bot.user.name}")
 
-  # Rejestracja widoków, aby działały stale po starcie bota
+  # Rejestracja głównego panelu jako trwałego
   bot.add_view(TicketSelectView())
-  bot.add_view(TicketManageView())
 
   try:
     bot.tree.copy_global_to(guild=MY_GUILD)
@@ -297,7 +358,7 @@ async def changelog_command(
   )
 
 
-# Komenda /ticket wysyłająca panel strefy pomocy
+# Komenda /ticket wysyłająca panel strefy pomocy (bez copyright)
 @bot.tree.command(
     name="ticket", description="Wysyła panel strefy pomocy (ticketów)"
 )
