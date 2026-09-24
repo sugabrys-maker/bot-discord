@@ -1,16 +1,17 @@
+import asyncio
 import os
 import threading
 import discord
 from discord.ext import commands
 from flask import Flask
 
-# Inicjalizacja aplikacji Flask (wymagane przez Render do utrzymania usługi)
+# Inicjalizacja aplikacji Flask (wymagane przez Render)
 app = Flask(__name__)
 
 
 @app.route("/")
 def home():
-  return "Bot Discord z komendą /changelog działa poprawnie na Renderze!", 200
+  return "Bot Discord z systemem ticketów działa poprawnie na Renderze!", 200
 
 
 def run_flask():
@@ -20,15 +21,107 @@ def run_flask():
 
 # Konfiguracja bota Discord
 intents = discord.Intents.default()
+intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# TUTAJ WPISZ ID SWOJEGO SERWERA (żeby komendy działały natychmiast)
-MY_GUILD = discord.Object(id=1462137124043227228)  # <--- ZMIEŃ NA SWOJE ID
+# ID Twojego serwera Discord
+MY_GUILD = discord.Object(id=1462137124043227228)
+
+
+# Widok przycisku do tworzenia ticketu (trwały)
+class TicketButtonView(discord.ui.View):
+
+  def __init__(self):
+    super().__init__(timeout=None)
+
+  @discord.ui.button(
+      label="Utwórz ticket",
+      style=discord.ButtonStyle.green,
+      custom_id="persistent_create_ticket",
+      emoji="📩",
+  )
+  async def create_ticket(
+      self, interaction: discord.Interaction, button: discord.ui.Button
+  ):
+    guild = interaction.guild
+    user = interaction.user
+
+    # Sprawdzenie, czy użytkownik ma już otwarto kanał ticketu
+    existing_channel = discord.utils.get(
+        guild.text_channels, name=f"ticket-{user.name.lower()}"
+    )
+    if existing_channel:
+      await interaction.response.send_message(
+          f"Masz już otwarty ticket: {existing_channel.mention}", ephemeral=True
+      )
+      return
+
+    # Uprawnienia: widzi tylko użytkownik, bot i administratorzy
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        user: discord.PermissionOverwrite(
+            view_channel=True, send_messages=True, read_message_history=True
+        ),
+        guild.me: discord.PermissionOverwrite(
+            view_channel=True, send_messages=True, read_message_history=True
+        ),
+    }
+
+    # Pobierz lub utwórz kategorię TICKETS
+    category = discord.utils.get(guild.categories, name="TICKETS")
+    if not category:
+      category = await guild.create_category("TICKETS")
+
+    # Tworzenie prywatnego kanału
+    ticket_channel = await guild.create_text_channel(
+        f"ticket-{user.name}", category=category, overwrites=overwrites
+    )
+
+    # Wiadomość powitalna w tickecie z przyciskiem zamknięcia
+    await ticket_channel.send(
+        f"Witaj {user.mention}! W czym możemy Ci pomóc?\nAdministracja wkrótce"
+        " odpowie.",
+        view=CloseTicketView(),
+    )
+
+    await interaction.response.send_message(
+        f"✅ Utworzono Twój ticket: {ticket_channel.mention}!", ephemeral=True
+    )
+
+
+# Widok przycisku do zamykania ticketu
+class CloseTicketView(discord.ui.View):
+
+  def __init__(self):
+    super().__init__(timeout=None)
+
+  @discord.ui.button(
+      label="Zamknij ticket",
+      style=discord.ButtonStyle.red,
+      custom_id="persistent_close_ticket",
+      emoji="🔒",
+  )
+  async def close_ticket(
+      self, interaction: discord.Interaction, button: discord.ui.Button
+  ):
+    await interaction.response.send_message(
+        "🔒 Zamykanie ticketa za 3 sekundy..."
+    )
+    await asyncio.sleep(3)
+    try:
+      await interaction.channel.delete()
+    except Exception:
+      pass
 
 
 @bot.event
 async def on_ready():
   print(f"Zalogowano pomyślnie jako: {bot.user.name}")
+
+  # Rejestracja trwała widoków przycisków, aby działały po restarcie bota
+  bot.add_view(TicketButtonView())
+  bot.add_view(CloseTicketView())
+
   try:
     bot.tree.copy_global_to(guild=MY_GUILD)
     synced = await bot.tree.sync(guild=MY_GUILD)
@@ -57,9 +150,12 @@ async def ping_command(interaction: discord.Interaction):
   await interaction.response.send_message(f"Pong! 🏓 Opóźnienie: {latency}ms")
 
 
-# Komenda /wyslij
+# Komenda /wyslij (obsługuje emotki poprawnie)
 @bot.tree.command(
-    name="wyslij", description="Wysyła określoną wiadomość przez bota"
+    name="wyslij",
+    description=(
+        "Wysyła określoną wiadomość przez bota (obsługuje emotki)"
+    ),
 )
 async def wyslij_command(
     interaction: discord.Interaction,
@@ -74,7 +170,7 @@ async def wyslij_command(
   )
 
 
-# Komenda /changelog z nagłówkiem BLOWHC.PL
+# Komenda /changelog (w stylu BLOWHC.PL)
 @bot.tree.command(
     name="changelog", description="Tworzy profesjonalny changelog serwera"
 )
@@ -87,29 +183,47 @@ async def changelog_command(
 ):
   docelowy_kanal = kanal or interaction.channel
 
-  # Tworzenie Embeda w stylu BLOWHC.PL
   embed = discord.Embed(
       title=f"🛠️ AKTUALIZACJA ({tryb.upper()})",
       description=f"{wiadomosc_wstepna}\n\n> {zmiany}",
-      color=discord.Color.gold(),  # Żółty pasek po lewej stronie
+      color=discord.Color.gold(),
   )
-
-  # Nagłówek zmieniony na BLOWHC.PL • CHANGELOG
   embed.set_author(name="BLOWHC.PL • CHANGELOG")
-
-  # Stopka z informacją, kto dodał changelog
   embed.set_footer(
       text=f"Wprowadzone przez: {interaction.user.name}",
       icon_url=interaction.user.display_avatar.url,
   )
 
-  # Wysłanie embeda na kanał
   await docelowy_kanal.send(embed=embed)
-
-  # Potwierdzenie dla administratora
   await interaction.response.send_message(
       f"✅ Pomyślnie opublikowano changelog na kanale"
       f" {docelowy_kanal.mention}!",
+      ephemeral=True,
+  )
+
+
+# Nowa komenda /ticket wysyłająca panel do tworzenia ticketów
+@bot.tree.command(
+    name="ticket", description="Wysyła panel do tworzenia ticketów na kanał"
+)
+async def ticket_command(
+    interaction: discord.Interaction, kanal: discord.TextChannel = None
+):
+  docelowy_kanal = kanal or interaction.channel
+
+  embed = discord.Embed(
+      title="🎫 SYSTEM TICKETÓW - BLOWHC.PL",
+      description=(
+          "Masz problem, pytanie lub chcesz coś zgłosić?\nKliknij przycisk"
+          " poniżej, aby utworzyć prywatny ticket z administracją."
+      ),
+      color=discord.Color.blue(),
+  )
+  embed.set_footer(text="BLOWHC.PL • System Pomocy")
+
+  await docelowy_kanal.send(embed=embed, view=TicketButtonView())
+  await interaction.response.send_message(
+      f"✅ Pomyślnie wysłano panel ticketów na kanał {docelowy_kanal.mention}!",
       ephemeral=True,
   )
 
@@ -121,10 +235,8 @@ if __name__ == "__main__":
     print("BŁĄD: Brak zmiennej środowiskowej DISCORD_BOT_TOKEN!")
     exit(1)
 
-  # Uruchomienie serwera Flask w osobnym wątku
   flask_thread = threading.Thread(target=run_flask)
   flask_thread.daemon = True
   flask_thread.start()
 
-  # Uruchomienie bota Discord
   bot.run(TOKEN)
