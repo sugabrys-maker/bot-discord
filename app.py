@@ -11,7 +11,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-  return "Bot Discord z systemem ticketów i ogłoszeń BLOWHC działa na Renderze!", 200
+  return "Bot Discord z systemem ticketów i banerów działa na Renderze!", 200
 
 
 def run_flask():
@@ -303,7 +303,7 @@ async def ping_command(interaction: discord.Interaction):
   await interaction.response.send_message(f"Pong! 🏓 Opóźnienie: {latency}ms")
 
 
-# Zaktualizowana komenda /wyslij w stylu BLOWHC (niebieski pasek, logo, format tablicy/embeda)
+# Komenda /wyslij
 @bot.tree.command(
     name="wyslij",
     description=(
@@ -319,12 +319,10 @@ async def wyslij_command(
 ):
   docelowy_kanal = kanal or interaction.channel
 
-  # Niebieski pasek boczny i ładny styl tabeli/embeda
   embed = discord.Embed(
       title=tytul, description=tresc, color=discord.Color.from_rgb(52, 152, 219)
   )
 
-  # Użycie podanego linku do logo lub awatara serwera jako miniatury w rogu
   uzyte_logo = logo_url or (
       interaction.guild.icon.url if interaction.guild.icon else None
   )
@@ -377,28 +375,52 @@ async def changelog_command(
   )
 
 
-# Komenda /ticket wysyłająca panel strefy pomocy
+# Komenda /ticket z banerem umieszczonym dokładnie pomiędzy tekstem
 @bot.tree.command(
-    name="ticket", description="Wysyła panel strefy pomocy (ticketów)"
+    name="ticket",
+    description=(
+        "Wysyła panel strefy pomocy (ticketów) z banerem w środku tekstu"
+    ),
 )
 async def ticket_command(
-    interaction: discord.Interaction, kanal: discord.TextChannel = None
+    interaction: discord.Interaction,
+    baner_url: str = None,
+    kanal: discord.TextChannel = None,
 ):
   docelowy_kanal = kanal or interaction.channel
+  color = discord.Color.from_rgb(114, 137, 218)
 
-  embed = discord.Embed(
+  # Górna część panelu
+  embed_top = discord.Embed(
       title="STREFA POMOCY • BLOWHC.PL",
       description=(
           "Jeżeli potrzebujesz pomocy, zgłosić gracza, otrzymać backup,"
-          " wybierz odpowiednią opcję w menu poniżej!\n\n> ➢"
-          " **Cierpliwość:** Prosimy cierpliwie czekać, maksymalny czas to"
-          " **72h**!\n> ➢ **Ważne:** Nie oznaczaj zarządu"
-          " (Właścicieli/Developerów). To zadanie administracji!"
+          " wybierz odpowiednią opcję w menu poniżej!"
       ),
-      color=discord.Color.from_rgb(114, 137, 218),
+      color=color,
   )
 
-  await docelowy_kanal.send(embed=embed, view=TicketSelectView())
+  # Dolna część panelu
+  embed_bottom = discord.Embed(
+      description=(
+          "> ➢ **Cierpliwość:** Prosimy cierpliwie czekać, maksymalny czas"
+          " to **72h**!\n> ➢ **Ważne:** Nie oznaczaj zarządu"
+          " (Właścicieli/Developerów). To zadanie administracji!"
+      ),
+      color=color,
+  )
+
+  # Układanie wiadomości (jeśli podano baner, wstawiamy go jako osobny embed dokładnie w środku)
+  if baner_url:
+    embed_banner = discord.Embed(color=color)
+    embed_banner.set_image(url=baner_url)
+    embeds_list = [embed_top, embed_banner, embed_bottom]
+  else:
+    # Jeśli brak banera, łączymy teksty w jeden embed
+    embed_top.description += f"\n\n{embed_bottom.description}"
+    embeds_list = [embed_top]
+
+  await docelowy_kanal.send(embeds=embeds_list, view=TicketSelectView())
   await interaction.response.send_message(
       f"✅ Pomyślnie wysłano panel ticketów na kanał {docelowy_kanal.mention}!",
       ephemeral=True,
