@@ -10,7 +10,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-  return "Bot Discord z natychmiastowymi komendami / działa na Renderze!", 200
+  return "Bot Discord z komendą /wyslij działa poprawnie na Renderze!", 200
 
 
 def run_flask():
@@ -22,18 +22,14 @@ def run_flask():
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# WAŻNE: Wpisz tutaj ID swojego serwera Discord, aby komendy pojawiły się natychmiast!
-# (Kliknij prawym przyciskiem myszy na nazwę swojego serwera na Discordzie -> Kopiuj ID)
-MY_GUILD = discord.Object(
-    id=1462137124043227228
-)  # <--- ZAMIEŃ TE CYFRY NA SWOJE ID SERWERA
+# TUTAJ WPISZ ID SWOJEGO SERWERA (żeby komendy działały natychmiast)
+MY_GUILD = discord.Object(id=1462137124043227228)  # <--- ZMIEŃ NA SWOJE ID
 
 
 @bot.event
 async def on_ready():
   print(f"Zalogowano pomyślnie jako: {bot.user.name}")
   try:
-    # Kopiuje i natychmiast synchronizuje komendy dla Twojego serwera (brak opóźnienia)
     bot.tree.copy_global_to(guild=MY_GUILD)
     synced = await bot.tree.sync(guild=MY_GUILD)
     print(
@@ -44,22 +40,43 @@ async def on_ready():
     print(f"Błąd podczas natychmiastowej synchronizacji komend: {e}")
 
 
-# Definicja komendy /start
+# Komenda /start
 @bot.tree.command(
     name="start", description="Rozpocznij pracę z botem na Renderze"
 )
 async def start_command(interaction: discord.Interaction):
   await interaction.response.send_message(
-      "Cześć! Jestem Twoim botem Discord z natychmiastowymi komendami ukośnika"
-      " (/) uruchomionym na Renderze."
+      "Cześć! Jestem Twoim botem Discord uruchomionym na Renderze."
   )
 
 
-# Definicja komendy /ping
+# Komenda /ping
 @bot.tree.command(name="ping", description="Sprawdź opóźnienie i status bota")
 async def ping_command(interaction: discord.Interaction):
   latency = round(bot.latency * 1000)
   await interaction.response.send_message(f"Pong! 🏓 Opóźnienie: {latency}ms")
+
+
+# Nowa komenda /wyslij
+@bot.tree.command(
+    name="wyslij", description="Wysyła określoną wiadomość przez bota"
+)
+async def wyslij_command(
+    interaction: discord.Interaction,
+    tekst: str,
+    kanal: discord.TextChannel = None,
+):
+  # Jeśli nie podano kanału, wyślij na obecnym kanale
+  docelowy_kanal = kanal or interaction.channel
+
+  # Wysłanie wiadomości przez bota na wskazany kanał
+  await docelowy_kanal.send(tekst)
+
+  # Prywatne potwierdzenie dla Ciebie, że wiadomość została wysłana
+  await interaction.response.send_message(
+      f"✅ Pomyślnie wysłano wiadomość na kanale {docelowy_kanal.mention}!",
+      ephemeral=True,
+  )
 
 
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
@@ -69,10 +86,10 @@ if __name__ == "__main__":
     print("BŁĄD: Brak zmiennej środowiskowej DISCORD_BOT_TOKEN!")
     exit(1)
 
-  # Uruchomienie serwera Flask w osobnym wątku (dla Render Web Service)
+  # Uruchomienie serwera Flask w osobnym wątku
   flask_thread = threading.Thread(target=run_flask)
   flask_thread.daemon = True
   flask_thread.start()
 
-  # Uruchomienie bota Discord w głównym wątku
+  # Uruchomienie bota Discord
   bot.run(TOKEN)
