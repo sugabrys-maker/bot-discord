@@ -11,7 +11,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-  return "Bot Discord z systemem ticketów działa poprawnie na Renderze!", 200
+  return "Bot Discord z zaawansowanym systemem ticketów działa na Renderze!", 200
 
 
 def run_flask():
@@ -28,35 +28,146 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 MY_GUILD = discord.Object(id=1462137124043227228)
 
 
-# Widok przycisku do tworzenia ticketu (trwały)
-class TicketButtonView(discord.ui.View):
+# Modal do podania powodu zamknięcia ticketa przez administratora
+class CloseTicketModal(discord.ui.Modal, title="Powód zamknięcia ticketa"):
+  powod = discord.ui.TextInput(
+      label="Powód zamknięcia",
+      placeholder="Wpisz powód zamknięcia ticketa...",
+      style=discord.TextStyle.paragraph,
+      required=True,
+  )
+
+  async def on_submit(self, interaction: discord.Interaction):
+    powod_tekst = self.powod.value
+    admin = interaction.user
+
+    await interaction.response.send_message(
+        f"🔒 **Ticket zamknięty przez:** {admin.mention}\n**Powód:**"
+        f" {powod_tekst}\n*Kanał zostanie usunięty za 3 sekundy...*"
+    )
+    await asyncio.sleep(3)
+    try:
+      await interaction.channel.delete()
+    except Exception:
+      pass
+
+
+# Panel zarządzania wewnątrz ticketa (Przyjmij / Zamknij)
+class TicketManageView(discord.ui.View):
 
   def __init__(self):
     super().__init__(timeout=None)
+    self.claimed_by = None
 
   @discord.ui.button(
-      label="Utwórz ticket",
-      style=discord.ButtonStyle.green,
-      custom_id="persistent_create_ticket",
-      emoji="📩",
+      label="Przyjmij ticket",
+      style=discord.ButtonStyle.blurple,
+      custom_id="ticket_claim_btn",
+      emoji="🙋‍♂️",
   )
-  async def create_ticket(
+  async def claim_ticket(
       self, interaction: discord.Interaction, button: discord.ui.Button
   ):
+    self.claimed_by = interaction.user
+    button.disabled = True
+    button.label = f"Przyjęte przez: {interaction.user.name}"
+    button.style = discord.ButtonStyle.green
+
+    embed = interaction.message.embeds[0]
+    embed.add_field(
+        name="📌 Status",
+        value=f"Ticket przyjęty przez: {interaction.user.mention}",
+        inline=False,
+    )
+
+    await interaction.message.edit(embed=embed, view=self)
+    await interaction.response.send_message(
+        f"✅ Pomyślnie przyjęto ticket przez {interaction.user.mention}!",
+        ephemeral=True,
+    )
+
+  @discord.ui.button(
+      label="Zamknij ticket",
+      style=discord.ButtonStyle.red,
+      custom_id="ticket_close_btn",
+      emoji="🔒",
+  )
+  async def close_ticket(
+      self, interaction: discord.Interaction, button: discord.ui.Button
+  ):
+    # Otwiera okienko wymuszające podanie powodu zamknięcia przez administratora
+    await interaction.response.send_modal(CloseTicketModal())
+
+
+# Rozwijane menu (Select Menu) z wyborami typów ticketów
+class TicketSelect(discord.ui.Select):
+
+  def __init__(self):
+    options = [
+        discord.SelectOption(
+            label="Pomoc",
+            value="pomoc",
+            description="Uzyskaj pomoc od administracji",
+            emoji="💡",
+        ),
+        discord.SelectOption(
+            label="Backup",
+            value="backup",
+            description="Sprawy związane z backupami",
+            emoji="💾",
+        ),
+        discord.SelectOption(
+            label="Zgłoś gracza",
+            value="zglos",
+            description="Zgłoś nieuczciwego gracza",
+            emoji="⚠️",
+        ),
+        discord.SelectOption(
+            label="Media",
+            value="media",
+            description="Sprawy dotyczące rangi Media",
+            emoji="🎥",
+        ),
+        discord.SelectOption(
+            label="Inne",
+            value="inne",
+            description="Inne zapytania",
+            emoji="📌",
+        ),
+    ]
+    super().__init__(
+        placeholder="Wybierz typ ticketa...",
+        min_values=1,
+        max_values=1,
+        options=options,
+        custom_id="persistent_ticket_select",
+    )
+
+  async def callback(self, interaction: discord.Interaction):
     guild = interaction.guild
     user = interaction.user
+    ticket_type = self.values[0]
 
-    # Sprawdzenie, czy użytkownik ma już otwarto kanał ticketu
+    type_names = {
+        "pomoc": "pomoc",
+        "backup": "backup",
+        "zglos": "zgloszenie",
+        "media": "media",
+        "inne": "inne",
+    }
+
+    channel_name = f"{type_names.get(ticket_type, 'ticket')}-{user.name.lower()}"
+
     existing_channel = discord.utils.get(
-        guild.text_channels, name=f"ticket-{user.name.lower()}"
+        guild.text_channels, name=channel_name
     )
     if existing_channel:
       await interaction.response.send_message(
-          f"Masz już otwarty ticket: {existing_channel.mention}", ephemeral=True
+          f"Masz już otwarty taki ticket: {existing_channel.mention}",
+          ephemeral=True,
       )
       return
 
-    # Uprawnienia: widzi tylko użytkownik, bot i administratorzy
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
         user: discord.PermissionOverwrite(
@@ -67,60 +178,44 @@ class TicketButtonView(discord.ui.View):
         ),
     }
 
-    # Pobierz lub utwórz kategorię TICKETS
     category = discord.utils.get(guild.categories, name="TICKETS")
     if not category:
       category = await guild.create_category("TICKETS")
 
-    # Tworzenie prywatnego kanału
     ticket_channel = await guild.create_text_channel(
-        f"ticket-{user.name}", category=category, overwrites=overwrites
+        channel_name, category=category, overwrites=overwrites
     )
 
-    # Wiadomość powitalna w tickecie z przyciskiem zamknięcia
-    await ticket_channel.send(
-        f"Witaj {user.mention}! W czym możemy Ci pomóc?\nAdministracja wkrótce"
-        " odpowie.",
-        view=CloseTicketView(),
+    ticket_embed = discord.Embed(
+        title=f"🎫 TICKET: {ticket_type.upper()}",
+        description=(
+            f"Witaj {user.mention}!\nWybrany typ ticketa:"
+            f" **{ticket_type.capitalize()}**.\nOpisz swój problem"
+            " szczegółowo, administracja wkrótce odpowie."
+        ),
+        color=discord.Color.green(),
     )
 
+    await ticket_channel.send(embed=ticket_embed, view=TicketManageView())
     await interaction.response.send_message(
         f"✅ Utworzono Twój ticket: {ticket_channel.mention}!", ephemeral=True
     )
 
 
-# Widok przycisku do zamykania ticketu
-class CloseTicketView(discord.ui.View):
+class TicketSelectView(discord.ui.View):
 
   def __init__(self):
     super().__init__(timeout=None)
-
-  @discord.ui.button(
-      label="Zamknij ticket",
-      style=discord.ButtonStyle.red,
-      custom_id="persistent_close_ticket",
-      emoji="🔒",
-  )
-  async def close_ticket(
-      self, interaction: discord.Interaction, button: discord.ui.Button
-  ):
-    await interaction.response.send_message(
-        "🔒 Zamykanie ticketa za 3 sekundy..."
-    )
-    await asyncio.sleep(3)
-    try:
-      await interaction.channel.delete()
-    except Exception:
-      pass
+    self.add_item(TicketSelect())
 
 
 @bot.event
 async def on_ready():
   print(f"Zalogowano pomyślnie jako: {bot.user.name}")
 
-  # Rejestracja trwała widoków przycisków, aby działały po restarcie bota
-  bot.add_view(TicketButtonView())
-  bot.add_view(CloseTicketView())
+  # Rejestracja widoków, aby działały stale po starcie bota
+  bot.add_view(TicketSelectView())
+  bot.add_view(TicketManageView())
 
   try:
     bot.tree.copy_global_to(guild=MY_GUILD)
@@ -139,7 +234,7 @@ async def on_ready():
 )
 async def start_command(interaction: discord.Interaction):
   await interaction.response.send_message(
-      "Cześć! Jestem Twoim botem Discord uruchomionym na Renderze."
+      "Cześć! Jestem Twoim botem uruchomionym na Renderze."
   )
 
 
@@ -150,7 +245,7 @@ async def ping_command(interaction: discord.Interaction):
   await interaction.response.send_message(f"Pong! 🏓 Opóźnienie: {latency}ms")
 
 
-# Komenda /wyslij (obsługuje emotki poprawnie)
+# Komenda /wyslij (obsługuje emotki)
 @bot.tree.command(
     name="wyslij",
     description=(
@@ -170,7 +265,7 @@ async def wyslij_command(
   )
 
 
-# Komenda /changelog (w stylu BLOWHC.PL)
+# Komenda /changelog
 @bot.tree.command(
     name="changelog", description="Tworzy profesjonalny changelog serwera"
 )
@@ -202,9 +297,9 @@ async def changelog_command(
   )
 
 
-# Nowa komenda /ticket wysyłająca panel do tworzenia ticketów
+# Komenda /ticket wysyłająca panel strefy pomocy
 @bot.tree.command(
-    name="ticket", description="Wysyła panel do tworzenia ticketów na kanał"
+    name="ticket", description="Wysyła panel strefy pomocy (ticketów)"
 )
 async def ticket_command(
     interaction: discord.Interaction, kanal: discord.TextChannel = None
@@ -212,16 +307,18 @@ async def ticket_command(
   docelowy_kanal = kanal or interaction.channel
 
   embed = discord.Embed(
-      title="🎫 SYSTEM TICKETÓW - BLOWHC.PL",
+      title="STREFA POMOCY • BLOWHC.PL",
       description=(
-          "Masz problem, pytanie lub chcesz coś zgłosić?\nKliknij przycisk"
-          " poniżej, aby utworzyć prywatny ticket z administracją."
+          "Jeżeli potrzebujesz pomocy, zgłosić gracza, otrzymać backup,"
+          " wybierz odpowiednią opcję w menu poniżej!\n\n> ➢"
+          " **Cierpliwość:** Prosimy cierpliwie czekać, maksymalny czas to"
+          " **72h**!\n> ➢ **Ważne:** Nie oznaczaj zarządu"
+          " (Właścicieli/Developerów). To zadanie administracji!"
       ),
-      color=discord.Color.blue(),
+      color=discord.Color.from_rgb(114, 137, 218),
   )
-  embed.set_footer(text="BLOWHC.PL • System Pomocy")
 
-  await docelowy_kanal.send(embed=embed, view=TicketButtonView())
+  await docelowy_kanal.send(embed=embed, view=TicketSelectView())
   await interaction.response.send_message(
       f"✅ Pomyślnie wysłano panel ticketów na kanał {docelowy_kanal.mention}!",
       ephemeral=True,
