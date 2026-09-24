@@ -11,7 +11,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-  return "Bot Discord z systemem ticketów i logów działa na Renderze!", 200
+  return "Bot Discord z systemem ticketów i ogłoszeń BLOWHC działa na Renderze!", 200
 
 
 def run_flask():
@@ -105,9 +105,7 @@ class CloseTicketModal(discord.ui.Modal, title="Powód zamknięcia ticketa"):
 class TicketManageView(discord.ui.View):
 
   def __init__(self, ticket_type, creator):
-    super().__init__(
-        timeout=86400
-    )  # Timeout ustawiony na 24h dla bezpieczeństwa przycisków
+    super().__init__(timeout=86400)
     self.ticket_type = ticket_type
     self.creator = creator
     self.claimed_by = "Nikt"
@@ -275,7 +273,6 @@ class TicketSelectView(discord.ui.View):
 async def on_ready():
   print(f"Zalogowano pomyślnie jako: {bot.user.name}")
 
-  # Rejestracja głównego panelu jako trwałego
   bot.add_view(TicketSelectView())
 
   try:
@@ -306,22 +303,44 @@ async def ping_command(interaction: discord.Interaction):
   await interaction.response.send_message(f"Pong! 🏓 Opóźnienie: {latency}ms")
 
 
-# Komenda /wyslij (obsługuje emotki)
+# Zaktualizowana komenda /wyslij w stylu BLOWHC (niebieski pasek, logo, format tablicy/embeda)
 @bot.tree.command(
     name="wyslij",
     description=(
-        "Wysyła określoną wiadomość przez bota (obsługuje emotki)"
+        "Wysyła ogłoszenie w stylu BLOWHC (niebieski pasek, logo i treść)"
     ),
 )
 async def wyslij_command(
     interaction: discord.Interaction,
-    tekst: str,
+    tytul: str,
+    tresc: str,
+    logo_url: str = None,
     kanal: discord.TextChannel = None,
 ):
   docelowy_kanal = kanal or interaction.channel
-  await docelowy_kanal.send(tekst)
+
+  # Niebieski pasek boczny i ładny styl tabeli/embeda
+  embed = discord.Embed(
+      title=tytul, description=tresc, color=discord.Color.from_rgb(52, 152, 219)
+  )
+
+  # Użycie podanego linku do logo lub awatara serwera jako miniatury w rogu
+  uzyte_logo = logo_url or (
+      interaction.guild.icon.url if interaction.guild.icon else None
+  )
+  if uzyte_logo:
+    embed.set_thumbnail(url=uzyte_logo)
+
+  embed.set_author(name="BLOWHC.PL • OGŁOSZENIE", icon_url=uzyte_logo)
+  embed.set_footer(
+      text=f"Wprowadzone przez: {interaction.user.name}",
+      icon_url=interaction.user.display_avatar.url,
+  )
+
+  await docelowy_kanal.send(embed=embed)
   await interaction.response.send_message(
-      f"✅ Pomyślnie wysłano wiadomość na kanale {docelowy_kanal.mention}!",
+      f"✅ Pomyślnie wysłano ogłoszenie BLOWHC na kanale"
+      f" {docelowy_kanal.mention}!",
       ephemeral=True,
   )
 
@@ -358,7 +377,7 @@ async def changelog_command(
   )
 
 
-# Komenda /ticket wysyłająca panel strefy pomocy (bez copyright)
+# Komenda /ticket wysyłająca panel strefy pomocy
 @bot.tree.command(
     name="ticket", description="Wysyła panel strefy pomocy (ticketów)"
 )
