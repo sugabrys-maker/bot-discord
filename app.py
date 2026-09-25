@@ -1,11 +1,12 @@
 import asyncio
 import os
 import threading
+import time
 import discord
 from discord.ext import commands
 from flask import Flask
 
-# Inicjalizacja aplikacji Flask (wymagane przez Render)
+# Inicjalizacja aplikacji Flask (wymagane przez Render i UptimeRobot)
 app = Flask(__name__)
 
 
@@ -45,12 +46,13 @@ class CloseTicketModal(discord.ui.Modal, title="Powód zamknięcia ticketa"):
   )
 
   async def on_submit(self, interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
     powod_tekst = self.powod.value
     admin = interaction.user
     guild = interaction.guild
     channel = interaction.channel
 
-    # Wyszukanie lub utworzenie kanału na historię/logi ticketów
     log_channel = discord.utils.get(guild.text_channels, name="ticket-logs")
     if not log_channel:
       category = discord.utils.get(guild.categories, name="TICKETS")
@@ -58,7 +60,6 @@ class CloseTicketModal(discord.ui.Modal, title="Powód zamknięcia ticketa"):
           "ticket-logs", category=category
       )
 
-    # Tworzenie embeda z historią ticketa do wysłania na kanał logów
     log_embed = discord.Embed(
         title="📁 ARCHIWUM / HISTORIA TICKETA", color=discord.Color.dark_red()
     )
@@ -90,9 +91,10 @@ class CloseTicketModal(discord.ui.Modal, title="Powód zamknięcia ticketa"):
     if log_channel:
       await log_channel.send(embed=log_embed)
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"🔒 **Ticket zamknięty przez:** {admin.mention}\n**Powód:**"
-        f" {powod_tekst}\n*Kanał zostanie usunięty za 3 sekundy...*"
+        f" {powod_tekst}\n*Kanał zostanie usunięty za 3 sekundy...*",
+        ephemeral=True,
     )
     await asyncio.sleep(3)
     try:
@@ -202,6 +204,8 @@ class TicketSelect(discord.ui.Select):
     )
 
   async def callback(self, interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
     guild = interaction.guild
     user = interaction.user
     ticket_type = self.values[0]
@@ -220,7 +224,7 @@ class TicketSelect(discord.ui.Select):
         guild.text_channels, name=channel_name
     )
     if existing_channel:
-      await interaction.response.send_message(
+      await interaction.followup.send(
           f"Masz już otwarty taki ticket: {existing_channel.mention}",
           ephemeral=True,
       )
@@ -257,7 +261,7 @@ class TicketSelect(discord.ui.Select):
     await ticket_channel.send(
         embed=ticket_embed, view=TicketManageView(ticket_type, user)
     )
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"✅ Utworzono Twój ticket: {ticket_channel.mention}!", ephemeral=True
     )
 
@@ -286,7 +290,7 @@ async def on_ready():
     print(f"Błąd podczas natychmiastowej synchronizacji komend: {e}")
 
 
-# Komenda /start
+# Komendy bota
 @bot.tree.command(
     name="start", description="Rozpocznij pracę z botem na Renderze"
 )
@@ -296,14 +300,12 @@ async def start_command(interaction: discord.Interaction):
   )
 
 
-# Komenda /ping
 @bot.tree.command(name="ping", description="Sprawdź opóźnienie i status bota")
 async def ping_command(interaction: discord.Interaction):
   latency = round(bot.latency * 1000)
   await interaction.response.send_message(f"Pong! 🏓 Opóźnienie: {latency}ms")
 
 
-# Komenda /wyslij
 @bot.tree.command(
     name="wyslij",
     description=(
@@ -318,7 +320,6 @@ async def wyslij_command(
     kanal: discord.TextChannel = None,
 ):
   docelowy_kanal = kanal or interaction.channel
-
   embed = discord.Embed(
       title=tytul, description=tresc, color=discord.Color.from_rgb(52, 152, 219)
   )
@@ -343,7 +344,6 @@ async def wyslij_command(
   )
 
 
-# Komenda /changelog
 @bot.tree.command(
     name="changelog", description="Tworzy profesjonalny changelog serwera"
 )
@@ -355,7 +355,6 @@ async def changelog_command(
     kanal: discord.TextChannel = None,
 ):
   docelowy_kanal = kanal or interaction.channel
-
   embed = discord.Embed(
       title=f"🛠️ AKTUALIZACJA ({tryb.upper()})",
       description=f"{wiadomosc_wstepna}\n\n> {zmiany}",
@@ -375,7 +374,6 @@ async def changelog_command(
   )
 
 
-# Komenda /ticket z banerem umieszczonym dokładnie pomiędzy tekstem
 @bot.tree.command(
     name="ticket",
     description=(
@@ -390,7 +388,6 @@ async def ticket_command(
   docelowy_kanal = kanal or interaction.channel
   color = discord.Color.from_rgb(114, 137, 218)
 
-  # Górna część panelu
   embed_top = discord.Embed(
       title="STREFA POMOCY • BLOWHC.PL",
       description=(
@@ -400,7 +397,6 @@ async def ticket_command(
       color=color,
   )
 
-  # Dolna część panelu
   embed_bottom = discord.Embed(
       description=(
           "> ➢ **Cierpliwość:** Prosimy cierpliwie czekać, maksymalny czas"
@@ -410,13 +406,11 @@ async def ticket_command(
       color=color,
   )
 
-  # Układanie wiadomości (jeśli podano baner, wstawiamy go jako osobny embed dokładnie w środku)
   if baner_url:
     embed_banner = discord.Embed(color=color)
     embed_banner.set_image(url=baner_url)
     embeds_list = [embed_top, embed_banner, embed_bottom]
   else:
-    # Jeśli brak banera, łączymy teksty w jeden embed
     embed_top.description += f"\n\n{embed_bottom.description}"
     embeds_list = [embed_top]
 
@@ -434,8 +428,20 @@ if __name__ == "__main__":
     print("BŁĄD: Brak zmiennej środowiskowej DISCORD_BOT_TOKEN!")
     exit(1)
 
+  # Uruchomienie serwera Flask w tle
   flask_thread = threading.Thread(target=run_flask)
   flask_thread.daemon = True
   flask_thread.start()
 
-  bot.run(TOKEN)
+  # Bezpieczna pętla startowa bota (zapobiega crashom i pętlam restartów przy Cloudflare 1015)
+  while True:
+    try:
+      print("Próba połączenia z Discordem...")
+      bot.run(TOKEN)
+    except Exception as e:
+      print(f"Błąd połączenia z Discordem (prawdopodobnie blokada Cloudflare): {e}")
+      print(
+          "Czekam 60 sekund przed ponowną próbą, aby serwer Flask pozostał"
+          " włączony..."
+      )
+      time.sleep(60)
