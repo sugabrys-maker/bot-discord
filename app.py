@@ -433,15 +433,12 @@ if __name__ == "__main__":
   flask_thread.daemon = True
   flask_thread.start()
 
-  # Bezpieczna pętla startowa bota (zapobiega crashom i pętlam restartów przy Cloudflare 1015)
+  # Bezpieczna pętla startowa bota
   while True:
     try:
       print("Próba połączenia z Discordem...")
       bot.run(TOKEN)
     except Exception as e:
-      print(f"Błąd połączenia z Discordem (prawdopodobnie blokada Cloudflare): {e}")
-      print(
-          "Czekam 60 sekund przed ponowną próbą, aby serwer Flask pozostał"
-          " włączony..."
-      )
+      print(f"Błąd połączenia z Discordem: {e}")
+      print("Czekam 60 sekund przed ponowną próbą...")
       time.sleep(60)
